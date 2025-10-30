@@ -1,0 +1,68 @@
+# PRELIMINARIES
+- [ ] implement COO multiplication with vector
+- [ ] implement CSR multiplication with vector
+
+# DELIVERABLE
+- [ ] implement conversion COO to CSR
+- [ ] implement 
+
+
+
+-------------------------------
+DELIVERABLE1 INSTRUCTION
+-------------------------------
+
+1) Read Matrix in Matrix Format and convert to CSR
+2) Multiply the Matrix with a randomly generated array
+3) Design a parallel code on a shared-memory system (using ....)
+
+
+
+1) write python script that generates a random sparse matrix into a .mtx file
+2) convert the COO format from .mtx file into a CSR format matrix
+3) figure out how to do MV product
+4) experiment with different parallelization techniques, making sure it works corrctly
+
+COO MATRIX:
+you're given a matrix in COO format (with the 3 arrays);
+you have:
+# rows
+# columns
+# nz elements
+you want:
+
+row_indixes[i] , col_indexes[j], values[k] -> Matrix format
+since C stores elements in a row major fashion:
+
+row_index[i]*leading_dimension + col_index[j] = val[i][j] 
+
+*/
+
+
+
+
+/* 
+*   Matrix Market I/O example program
+*
+*   Read a real (non-complex) sparse matrix from a Matrix Market (v. 2.0) file.
+*   and copies it to stdout.  This porgram does nothing useful, but
+*   illustrates common usage of the Matrix Matrix I/O routines.
+*   (See http://math.nist.gov/MatrixMarket for details.)
+*
+*   Usage:  a.out [filename] > output
+*
+*       
+*   NOTES:
+*
+*   1) Matrix Market files are always 1-based, i.e. the index of the first
+*      element of a matrix is (1,1), not (0,0) as in C.  ADJUST THESE
+*      OFFSETS ACCORDINGLY offsets accordingly when reading and writing 
+*      to files.
+*
+*   2) ANSI C requires one to use the "l" format modifier when reading
+*      double precision floating point numbers in scanf() and
+*      its variants.  For example, use "%lf", "%lg", or "%le"
+*      when reading doubles, otherwise errors will occur.
+*/
+
+
