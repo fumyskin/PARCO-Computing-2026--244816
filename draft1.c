@@ -84,13 +84,13 @@ struct Sparse_CSR *coo_to_csr_matrix(struct Sparse_Coordinate *p){
     struct Sparse_CSR *q;
     unsigned count, i, r, c, ri, ci, cols, k, l, rows;
     unsigned *col_ind, *row_ptr, *prow_ind, *pcol_ind;
-    double c, *val, *pval;
-    unsigned n = p->n;
-    coo_quicksort(p, 0, n); // figure out whether it's better to write it yourself or not
+    double x, *val, *pval;
+    unsigned n = p->nnz;
+    coo_quicksort(p); // to check correct functioning
     k = coo_count(p);
     rows=p->n_rows; prow_ind=p->row_indices; pcol_ind=p->col_indices;
     pval=p->values;
-    q=surely_malloc(sizeof(struct Sparse_CSR)); //?
+    q=surely_malloc(sizeof(struct Sparse_CSR)); //check correctt functioning
     val=surely_malloc(k*sizeof(double));
     col_ind=surely_malloc(k*sizeof(unsigned));
     row_ptr=surely_malloc((rows+1)*sizeof(unsigned));
@@ -105,7 +105,7 @@ struct Sparse_CSR *coo_to_csr_matrix(struct Sparse_Coordinate *p){
             if (ci == c){
                 val[l-1] += x;
             }else{
-                c = ci; col_ind[l] = ci; val[l] = x; l++
+                c = ci; col_ind[l] = ci; val[l] = x; l++;
             }
         }else{
             while (r+1<=ri){
@@ -114,15 +114,18 @@ struct Sparse_CSR *coo_to_csr_matrix(struct Sparse_Coordinate *p){
             }
         }
     }
-
-
-    cols = p->cols;
+    cols = p->n_cols;
     while(r+1 <= rows){
         row_ptr[++r] = l;
-        q->val = val; q->col_ind = col_ind; q->row_ptr = row_ptr;
-        q->rows = rows; q->cols = cols;
-        return q;
     }
+
+    q->val = val; 
+    q->col_ind = col_ind; 
+    q->row_ptr = row_ptr;
+    q->rows = rows; 
+    q->cols = cols;
+    
+    return q;
 
 }
 
