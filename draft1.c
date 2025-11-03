@@ -4,22 +4,23 @@
 
 
 typedef struct {
-    int n_rows;
-    int n_cols;
-    int nnz;
-    int* row_indices;
-    int* col_indices;
+    unsigned n_rows;
+    unsigned n_cols;
+    unsigned nnz;
+    unsigned* row_indices;
+    unsigned* col_indices;
     double* values;
 }Sparse_Coordinate;
 
 typedef_struct{
-    int n_rows;
-    int n_cols;
-    int nnz;
-    int* row_indices;
-    int* col_indices;
+    unsigned n_rows;
+    unsigned n_cols;
+    unsigned* row_indices;
+    unsigned* col_indices;
     double* values;
 }Sparse_CSR;
+
+
 
 //function to initialize a struct COO given the data extracted from .mtx file
 Sparse_Coordinate* initialize_COO(
@@ -42,6 +43,7 @@ Sparse_Coordinate* initialize_COO(
     return struct_COO;
 }
 
+
 //function to perform matrix
 void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
 
@@ -61,6 +63,68 @@ void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
 }
 
 
+unsigned coo_count(struct Sparse_Coordinate *p){
+
+    if (p == NULL || p->n == 0)
+        return 0;
+
+    unsigned i, n = p->n; 
+    if (n == 0) return 0;
+    unsigned count = 1;
+    for (i=1; i<n; i++){
+        if (p->row_indices[i-1] !=p->row_indices[i] || 
+            p->col_indices[i-1] !=p->col_indices[i]){
+            count++;
+        }
+    }
+    return count;
+}
+
+struct Sparse_CSR *coo_to_csr_matrix(struct Sparse_Coordinate *p){
+    struct Sparse_CSR *q;
+    unsigned count, i, r, c, ri, ci, cols, k, l, rows;
+    unsigned *col_ind, *row_ptr, *prow_ind, *pcol_ind;
+    double c, *val, *pval;
+    unsigned n = p->n;
+    coo_quicksort(p, 0, n); // figure out whether it's better to write it yourself or not
+    k = coo_count(p);
+    rows=p->n_rows; prow_ind=p->row_indices; pcol_ind=p->col_indices;
+    pval=p->values;
+    q=surely_malloc(sizeof(struct Sparse_CSR)); //?
+    val=surely_malloc(k*sizeof(double));
+    col_ind=surely_malloc(k*sizeof(unsigned));
+    row_ptr=surely_malloc((rows+1)*sizeof(unsigned));
+
+    r=-1;
+    c=0;
+    l=0;
+
+    for(i=0; i<n; i++){
+        ri = prow_ind[i]; ci = pcol_ind[i]; x = pval[i];
+        if (ri == r){
+            if (ci == c){
+                val[l-1] += x;
+            }else{
+                c = ci; col_ind[l] = ci; val[l] = x; l++
+            }
+        }else{
+            while (r+1<=ri){
+                row_ptr[++r] = l;
+                c = ci; col_ind[l] = ci; val[l] = x; l++;
+            }
+        }
+    }
+
+
+    cols = p->cols;
+    while(r+1 <= rows){
+        row_ptr[++r] = l;
+        q->val = val; q->col_ind = col_ind; q->row_ptr = row_ptr;
+        q->rows = rows; q->cols = cols;
+        return q;
+    }
+
+}
 
 
 
@@ -138,6 +202,8 @@ int main(int argc, char *argv[])
 
     //create struct with data read from .mtx file
     Sparse_Coordinate* struct_COO = initialize_COO(M, N, nz, I, J, val);
+    //convert COO to CSR
+    Sparse_CSR* struct_CSR = convert_COO_CSR(M, N, nz, &struct_COO);
 
     //INITIALIZE MATRIX VECTOR MULTIPLICATION
     double* res = malloc(N * sizeof(double));
@@ -162,6 +228,28 @@ int main(int argc, char *argv[])
     free(vec);
     free(res);
     free(struct_COO);
+
+
+
+    // test for quicksort
+    // unsigned rows[] = {2, 0, 1, 2, 0};
+    // unsigned cols[] = {1, 2, 0, 0, 1};
+    // double vals[] =  {5.0, 2.0, 1.0, 4.0, 3.0};
+
+    // Sparse_Coordinate coo = {
+    //     .n_rows = 3,
+    //     .n_cols = 3,
+    //     .nnz = 5,
+    //     .row_indices = rows,
+    //     .col_indices = cols,
+    //     .values = vals
+    // };
+
+    // quicksort_coo(&coo);
+
+    // for (unsigned i = 0; i < coo.nnz; i++)
+    //     printf("(%u, %u, %.1f)\n", rows[i], cols[i], vals[i]);
+
   
 	return 0;
 }

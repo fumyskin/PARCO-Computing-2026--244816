@@ -19,6 +19,25 @@
     -> SORTING data can improve branch prediction and speed up execution
 
 
+## OPENMP
+- Thread team size control -> either define a FIXED NUMBER OF THREADS by using:
+• $ echo ${OMP_NUM_THREADS} # to query the value
+• $ export OMP_NUM_THREADS=4 # to set it in BASH
+
+or define the number of threads at program level (which may be better ?)
+
+- verify that the code you want to parallelize with openmp CAN be parallelized:
+    • The variable index must have integer or pointer type (e.g., it can’t be a float).
+    • The expressions start, end, and incr must have a compatible type. For example, if index is a pointer, then incr must have integer type.
+    • The expressions start, end, and incr must not change during execution of the loop.
+    • During execution of the loop, the variable index can only be modified by the “increment expression” in the for statement.
+
+- look at : #pragma omp parallel for collaps(n); #pragma omp parallel for (); #pragma 
+- make sure work is assigned almost equally
+- to run pragma omp parallel , take a look at the cyclic schedule with static keyword (page 42 pp 9)
+- maybe omp parallel with chunk division is better and more general purpose than simple pragma omp parallel for -> **dynamic or guided is better for managing chunks that change in size** -> IN THE DELIVERABLE CONSIDER ALSO DIFFERENT CHUNK SIZES -> EVALUATE WHICH CHUNK DIVISION is better 
+- REALLY IMPORTANT: BARRIER DIRECTIVE
+
 
 # REFERENCES
 https://ieeexplore.ieee.org/document/10444348 -> paper to Efficient COO to CSR Conversion for Accelerating Sparse Matrix Processing on FPGA
@@ -26,3 +45,5 @@ https://ieeexplore.ieee.org/document/10444348 -> paper to Efficient COO to CSR C
 https://arxiv.org/abs/2510.13412 -> paper to Formal Verification of COO to CSR Sparse Matrix Conversion (Invited Paper) -> https://www.cs.princeton.edu/~appel/papers/coo-csr.pdf
 
 https://stackoverflow.com/questions/23583975/convert-coo-to-csr-format-in-c -> Convert COO to CSR format in c++ stackoverflow
+
+
