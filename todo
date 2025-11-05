@@ -1,10 +1,10 @@
 # PRELIMINARIES
-- [ ] implement COO multiplication with vector
-- [ ] implement CSR multiplication with vector
+- [x ] implement COO multiplication with vector
+- [x] implement CSR multiplication with vector
 
 # DELIVERABLE
-- [ ] implement conversion COO to CSR
-- [ ] implement 
+- [x] implement conversion COO to CSR
+- [ ] examine the cache performance of sequential code under 5 different type of sparse matrices (this allows you to verify the code is working and general purpose as well) 
 
 
 

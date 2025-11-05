@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <immintrin.h>
+#include <pthread.h>
+#include <omp.h>
 #include "mmio.h"
 #include "specifications.h"
 
@@ -45,7 +47,6 @@ Sparse_Coordinate* initialize_COO(
 
 //function to perform matrix
 void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
-
     for(int i = 0; i < COO->n_rows; i++){
         res[i] = 0;
     }
@@ -63,7 +64,6 @@ void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
 
 
 unsigned coo_count(Sparse_Coordinate *p){
-
     if (p == NULL || p->nnz == 0)
         return 0;
 
@@ -142,6 +142,8 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
     unsigned *col_ind = m->col_ind;
     unsigned *row_ptr = m->row_ptr;
     unsigned next=row_ptr[0];
+
+    #pragma omp parallel for schedule(static)
     for (i = 0; i < rows; i++) {
         double s = 0.0;
         for (unsigned h = row_ptr[i]; h < row_ptr[i + 1]; h++) {
