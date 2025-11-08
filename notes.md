@@ -71,4 +71,10 @@ https://arxiv.org/abs/2510.13412 -> paper to Formal Verification of COO to CSR S
 
 https://stackoverflow.com/questions/23583975/convert-coo-to-csr-format-in-c -> Convert COO to CSR format in c++ stackoverflow
 
+https://www.intel.com/content/www/us/en/developer/articles/technical/intel64-and-ia32-architectures-optimization.html -> intel manual for caching optimization under intel processor (which I have, i guess it's still useful to refer to it even if cores are not intel)
 
+https://stackoverflow.com/questions/10850155/whats-the-difference-between-static-and-dynamic-schedule-in-openmp -> reference for openmp static/dynamic scheduling
+
+https://arxiv.org/html/2502.19284v1#alg1 -> regarding the optimization of SpMV algorithm
+
+https://michalpitr.substack.com/p/optimizing-matrix-multiplication -> inspo for perf stat functionaity
