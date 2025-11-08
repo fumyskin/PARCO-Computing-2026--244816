@@ -250,7 +250,7 @@ int main(int argc, char *argv[])
     double* vec;
 
     //allocate aligned result/vector buffers to 64 bytes boundary ? is this even correct ? 
-    if (posix_memalign((void**)&res, 64, N * sizeof(double)) != 0) {
+    if (posix_memalign((void**)&res, 64, N * sizeof(double)) != 0) { // allocate res aligned to 64 bytes
         perror("posix_memalign res");
         exit(1);
     }
