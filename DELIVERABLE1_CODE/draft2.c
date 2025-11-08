@@ -24,9 +24,8 @@ static inline double fma_fallback(double a, double b, double c) {
 
 //padding structure to avoid false sharing between threads
 typedef struct alignTo64ByteCacheLine {
-    int_onCacheLine1__attribute__((aligned(64)));
-    int_onCacheLine2__attribute__((aligned(64)));
-};
+    char pad[64];
+} alignTo64ByteCacheLine;
 
 
 //function to initialize a struct COO given the data extracted from .mtx file
@@ -144,32 +143,29 @@ blocking, prefetching, improve locality, reduce indirection)
 parallelization)
 */
 void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
-    unsigned i, rows = m->n_rows;
+    unsigned rows = m->n_rows;
     double *val = m->values;
     unsigned *col_ind = m->col_ind;
     unsigned *row_ptr = m->row_ptr;
-    unsigned next=row_ptr[0];
 
-    #pragma omp parallel for schedule(guided)
-    for (i = 0; i < rows; i++) {
-        double s = 0.0; // private scope to each thread
-        for (unsigned h = row_ptr[i]; h < row_ptr[i + 1]; h++) {
-            double x = val[h];
-            unsigned j = col_ind[h];
-            s = fma_fallback(x, v[j], s);
+    //  manual static partitioning: each thread writes a contiguous block of rows
+    // (avoids different threads writing elements that share a cache line) 
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int nthreads = omp_get_num_threads();
+        unsigned start = (rows * (unsigned)tid) / (unsigned)nthreads;
+        unsigned end   = (rows * (unsigned)(tid + 1)) / (unsigned)nthreads;
+
+        for (unsigned i = start; i < end; ++i) {
+            double s = 0.0;
+            for (unsigned h = row_ptr[i]; h < row_ptr[i + 1]; ++h) {
+                s = fma_fallback(val[h], v[col_ind[h]], s);
+            }
+            p[i] = s;
         }
-        p[i] = s;
     }
-
-    // #pragma omp barrier
-    // #pragma omp master 
-    // {
-    //     //finalization code ?
-    // }
-    // #pragma omp barrier
-
 }
-
 
 
 
@@ -250,8 +246,19 @@ int main(int argc, char *argv[])
     //Sparse_CSR* struct_CSR = convert_COO_CSR(M, N, nz, &struct_COO);
 
     //INITIALIZE MATRIX VECTOR MULTIPLICATION
-    double* res = malloc(N * sizeof(double));
-    double* vec = malloc(M * sizeof(double));
+    double* res;
+    double* vec;
+
+    //allocate aligned result/vector buffers to 64 bytes boundary ? is this even correct ? 
+    if (posix_memalign((void**)&res, 64, N * sizeof(double)) != 0) {
+        perror("posix_memalign res");
+        exit(1);
+    }
+    if (posix_memalign((void**)&vec, 64, M * sizeof(double)) != 0) {
+        perror("posix_memalign vec");
+        exit(1);
+    }
+
 
     //INITIALIZE RANDOM VECTOR
     srand(0);
@@ -269,7 +276,11 @@ int main(int argc, char *argv[])
 
     //INITIALIZE CSR MATRIX FROM COO
     Sparse_CSR* struct_CSR = coo_to_csr_matrix(struct_COO);
-    double* res_csr = malloc(M * sizeof(double));
+    double *res_csr;
+    if (posix_memalign((void**)&res_csr, 64, M * sizeof(double)) != 0) {
+        perror("posix_memalign res_csr");
+        exit(1);
+    }
 
     //COMPUTE SpMV WITH CSR
     double start = omp_get_wtime();
