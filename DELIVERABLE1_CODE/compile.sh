@@ -4,8 +4,8 @@
 # Configuration
 MATRIX="1138_bus/1138_bus.mtx"
 RUNS=12
-THREADS=(1 2 4 8 16)  # adjust for your system
-EXECUTABLES=("spmv_static" "spmv_dynamic" "spmv_guided")
+THREADS=(1 2 4 8 16 32 64)  # adjust for your system
+EXECUTABLES=("spmv_static" "spmv_dynamic" "spmv_guided" "spmv_manual")
 CHUNK_SIZE=(10 100 1000)
 
 # others to add: "spmv_collapse" "spmv_runtime" "spmv_auto" "spmv_chunked"!!!!!!!!!!!

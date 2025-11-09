@@ -22,12 +22,6 @@ static inline double fma_fallback(double a, double b, double c) {
 #endif
 
 
-//padding structure to avoid false sharing between threads
-typedef struct alignTo64ByteCacheLine {
-    int_onCacheLine1__attribute__((aligned(64)));
-    int_onCacheLine2__attribute__((aligned(64)));
-};
-
 
 //function to initialize a struct COO given the data extracted from .mtx file
 Sparse_Coordinate* initialize_COO(
@@ -150,7 +144,7 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
     unsigned *row_ptr = m->row_ptr;
     unsigned next=row_ptr[0];
 
-    #pragma omp parallel for schedule(static)
+    // sequential implementation
     for (i = 0; i < rows; i++) {
         double s = 0.0; // private scope to each thread
         for (unsigned h = row_ptr[i]; h < row_ptr[i + 1]; h++) {
