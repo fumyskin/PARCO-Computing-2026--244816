@@ -6,6 +6,7 @@
 #include "mmio.h"
 #include "specifications.h"
 
+
 //define fma block operation
 #if defined(__x86_64__) && defined(__FMA__)
 static inline double fma_fallback(double a, double b, double c) {
