@@ -309,11 +309,7 @@ int main(int argc, char *argv[])
     csr_mv_multiply(struct_CSR, vec, res_csr);
     double end = omp_get_wtime();
     printf("\nElapsed time: %g seconds\n", end - start);
-
-    // printf("\nCSR Result (first 10 entries):\n");
-    // for (int i = 0; i < M && i < 10; i++) {
-    //     printf("res_csr[%d] = %g\n", i, res_csr[i]);
-    // }   
+ 
     
     free(I);
     free(J);
@@ -326,50 +322,4 @@ int main(int argc, char *argv[])
     
     return 0;
 
-
-    // test for quicksort
-    // unsigned rows[] = {2, 0, 1, 2, 0};
-    // unsigned cols[] = {1, 2, 0, 0, 1};
-    // double vals[] =  {5.0, 2.0, 1.0, 4.0, 3.0};
-
-    // Sparse_Coordinate coo = {
-    //     .n_rows = 3,
-    //     .n_cols = 3,
-    //     .nnz = 5,
-    //     .row_indices = rows,
-    //     .col_indices = cols,
-    //     .values = vals
-    // };
-
-    // quicksort_coo(&coo);
-
-    // for (unsigned i = 0; i < coo.nnz; i++)
-    //     printf("(%u, %u, %.1f)\n", rows[i], cols[i], vals[i]);
-
 }
-
-
-
-
-
-/*
-NOTES ON PARALLELIZATION
-CACHE
-
-- efficient parallel code we need to assure that SEQUENTIAL PARTS ARE PERFORMANT
-- TRY TO COORDINATE SEQUENTIAL PARTS in such a way that exploit cache as much as possible (eg row major, ...)
-- WARNING:
-    - FALSE SHARING MAY BE A PROBLEM
-    -> if you use cache, pay attention to cache lines: if data is invalidated, the entire content of cache line is
-    -> FORCE VARIABLES WHICH ARE ACCESSED BY DIFFERENT THREADS TO BE ON DIFFERENT CACHE LINES
-    
-        struct alignTo64ByteCacheLine {
-            int _onCacheLine1 __attribute__((aligned(64)))
-            int _onCacheLine2 __attribute__((aligned(64)))
-        }
-
-    - BRANCH PREDICTION
-    -> Random data leads to unpredictable branches, slowing execution
-    -> SORTING data can improve branch prediction and speed up execution
-
-*/
