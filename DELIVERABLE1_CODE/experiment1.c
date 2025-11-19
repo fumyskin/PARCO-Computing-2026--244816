@@ -14,7 +14,7 @@
 *      *: <static>,<dynamic>,<guided>,<auto>,<runtime>
 *
 *    - otherwise, withouth optimization of brach prediction, run with:
-*      gcc mmio.h specifications.c experiment0.c -fopenmp -o spmv_*
+*      gcc mmio.h specifications.c experiment1.c -fopenmp -o spmv_*
 *
 */
 
