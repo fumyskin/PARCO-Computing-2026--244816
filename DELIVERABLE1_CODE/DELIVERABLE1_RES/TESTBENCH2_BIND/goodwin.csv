@@ -1,0 +1,9 @@
+Executable,Threads,Run,ChunkSize,Time
+spmv_bind,1,1,NA,0.001197
+spmv_bind,2,1,NA,0.000578
+spmv_bind,4,1,NA,0.000931
+spmv_bind,8,1,NA,0.000816
+spmv_bind,16,1,NA,0.001576
+spmv_bind,32,1,NA,0.001545
+spmv_bind,64,1,NA,0.001573
+spmv_bind,96,1,NA,0.000770

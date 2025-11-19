@@ -298,11 +298,26 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    int N_ITERS = 20;
+    double total = 0;
+
+    for(int i = 0; i < N_ITERS; i++) {
+        double t0 = omp_get_wtime();
+        csr_mv_multiply(struct_CSR, vec, res_csr);
+        double t1 = omp_get_wtime();
+        total += (t1 - t0);
+    }
+
+    double avg_time = total/N_ITERS;
+    printf("\nElapsed time: %.6f seconds\n", avg_time);
+
+
+
     //COMPUTE SpMV WITH CSR
-    double start = omp_get_wtime();
-    csr_mv_multiply(struct_CSR, vec, res_csr);
-    double end = omp_get_wtime();
-    printf("\nElapsed time: %g seconds\n", end - start);
+    // double start = omp_get_wtime();
+    // csr_mv_multiply(struct_CSR, vec, res_csr);
+    // double end = omp_get_wtime();
+    // printf("\nElapsed time: %g seconds\n", end - start);
 
     // //COMPUTE SpMV WITH COO (for verification)
     // SpMV_COO(struct_COO, vec, res);

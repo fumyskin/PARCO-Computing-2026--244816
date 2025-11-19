@@ -4,8 +4,8 @@
 clear; close all; clc;
 
 %% Configuration
-resultsDir = './DELIVERABLE1_RES/ARCH3_32'; % Change to your results directory path
-outputDir = './DELIVERABLE1_IMAGES/ARCH3_32_2'; % Folder to save figures
+resultsDir = './DELIVERABLE1_RES/TESTBENCH3_RES'; % Change to your results directory path
+outputDir = './DELIVERABLE1_IMAGES/TESTBENCH3_IMAGES'; % Folder to save figures
 
 % Create output folder if it doesn't exist
 if ~exist(outputDir, 'dir')

@@ -475,13 +475,13 @@ int main(int argc, char *argv[])
 
     for(int i = 0; i < N_ITERS; i++) {
         double t0 = omp_get_wtime();
-        merge_path_csr_mv(struct_CSR, vec, res_csr, 0);
-        //csr_mv_multiply(struct_CSR, vec, res_csr);
+        csr_mv_multiply(struct_CSR, vec, res_csr);
         double t1 = omp_get_wtime();
         total += (t1 - t0);
     }
 
-    printf("Average merge-path time = %.6f s\n", total / N_ITERS);
+    double avg_time = total/N_ITERS;
+    printf("\nElapsed time: %.6f seconds\n", avg_time);
 
     // // COMPUTE SpMV WITH COO (for verification)
     // SpMV_COO(struct_COO, vec, res);

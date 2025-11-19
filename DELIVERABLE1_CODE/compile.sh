@@ -4,7 +4,7 @@
 # ===========================
 # Configuration
 # ===========================
-MATRICES=("MATRICES/flowmeter0/flowmeter0.mtx" "MATRICES/1138_bus/1138_bus.mtx")
+MATRICES=("MATRICES/flowmeter0/flowmeter0.mtx" "MATRICES/1138_bus/1138_bus.mtx" "MATRICES/cond-mat-2005/cond-mat-2005.mtx" "MATRICES/blockqp1/blockqp1.mtx")
 RUNS=1
 THREADS=(1 2 4 8 16 32 64 96)
 EXECUTABLES=("spmv_sequential" "spmv_static" "spmv_manual" "spmv_dynamic" "spmv_guided" \
