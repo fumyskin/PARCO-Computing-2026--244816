@@ -345,8 +345,8 @@ int main(int argc, char *argv[])
     csr_mv_multiply(struct_CSR, vec, res_csr);
     double end = omp_get_wtime();
     printf("\nElapsed time: %g seconds\n", end - start);
- 
 
+    
     // //verify CSR vs COO correctness -> VERIFIED AND CORRECT
     // double tol = 1e-12; // tolerance delta to compare similar results up to tol
     // int ok = compare_spmv_results(struct_COO, struct_CSR, vec, tol);
