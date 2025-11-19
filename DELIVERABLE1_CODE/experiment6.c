@@ -3,33 +3,10 @@
 #include <immintrin.h>
 #include <pthread.h>
 #include <omp.h>
-#include <string.h>
-#include <stdint.h>
 #include <math.h>
+#include <limits.h>
 #include "mmio.h"
 #include "specifications.h"
-
-typedef struct {
-    unsigned n_rows;
-    unsigned n_cols;
-    unsigned nnz;
-
-    unsigned beta;     // block size
-    unsigned nb_r;     // number of block rows
-    unsigned nb_c;     // number of block cols
-    unsigned bits;     // log2(beta)
-
-    unsigned *blk_ptr; // length = nb_r * nb_c + 1
-    double   *values;  // length = nnz
-    uint32_t *idx;     // packed (r_in, c_in)
-} Sparse_CSB;
-
-// block entry block
-typedef struct {
-    uint32_t r_in, c_in;
-    double   val;
-    uint32_t key;
-} BlockEntry;
 
 //define fma block operation
 #if defined(__x86_64__) && defined(__FMA__)
@@ -46,31 +23,162 @@ static inline double fma_fallback(double a, double b, double c) {
 }
 #endif
 
+// A small struct to return coordinates (row_index, nz_index)
+typedef struct {
+    unsigned row;   // x coordinate (number of row-end events consumed)
+    unsigned nz;    // y coordinate (number of nonzero events consumed)
+} MergeCoord;
 
-// Morton helpers: 
-static inline unsigned highest_pow2_le(unsigned x) {
-    return x == 0 ? 1 : (1u << (31 - __builtin_clz(x)));
-}
+// MergePathSearch:
+// diagonal : target diagonal index in the logical merge path (0..num_rows+nnz)
+// a_len    : number of row-end entries (num_rows)
+// b_len    : number of nonzeros (nnz)
+// row_end_offsets : pointer to row end offsets for rows 0..(num_rows-1)
+//                   (this is A.row_ptr + 1 in the paper: the end index for each row)
+static inline MergeCoord MergePathSearch(
+    unsigned diagonal,
+    const unsigned *row_end_offsets, // length a_len, each entry is an index in [0..b_len]
+    unsigned a_len,
+    unsigned b_len)
+{
+    // x corresponds to number of row-end events consumed (0..a_len)
+    // y = diagonal - x
+    unsigned x_min = (diagonal > b_len) ? (diagonal - b_len) : 0;
+    unsigned x_max = (diagonal < a_len) ? diagonal : a_len;
 
-static inline unsigned choose_beta_pow2(unsigned n) {
-    unsigned b = (unsigned)sqrt((double)n);
-    if (b == 0) b = 1;
-    return highest_pow2_le(b);
-}
-
-static inline uint32_t morton_key(unsigned r, unsigned c, unsigned bits) {
-    uint32_t key = 0;
-    for (int k = bits-1; k >= 0; k--) {
-        key = (key << 2) |
-              (((r >> k) & 1u) << 1) |
-              ((c >> k) & 1u);
+    // binary search along x in [x_min, x_max]
+    while (x_min < x_max) {
+        unsigned pivot = (x_min + x_max) >> 1;
+        // Compare A[pivot] <= B[diagonal - pivot - 1]
+        // Here B[k] == k  (the natural numbers), so B[diagonal - pivot - 1] == (diagonal - pivot - 1)
+        // Careful when diagonal - pivot == 0: then diagonal - pivot - 1 underflows -> but
+        // the conditional range of pivot ensures we won't read invalid B index: the formula
+        // is the same as in the paper.
+        int b_index = (int)diagonal - (int)pivot - 1; // may be negative
+        // If b_index < 0 then treat B[b_index] as -infty -> then condition A[pivot] <= B[...] false
+        int cmp;
+        if (b_index < 0) {
+            cmp = 0; // a[pivot] <= B[...] is false (keep bottom-left)
+        } else {
+            // row_end_offsets[pivot] is an unsigned index into nonzero array
+            // compare row_end_offsets[pivot] <= b_index
+            cmp = (row_end_offsets[pivot] <= (unsigned)b_index);
+        }
+        if (cmp) {
+            // keep top-right half
+            x_min = pivot + 1;
+        } else {
+            // keep bottom-left half
+            x_max = pivot;
+        }
     }
-    return key;
+
+    MergeCoord c;
+    c.row = (x_min < a_len) ? x_min : a_len;
+    c.nz  = diagonal - x_min;
+    return c;
+}
+
+
+// Merge-path based parallel CSR SpMV
+// m     : pointer to your Sparse_CSR
+// x     : dense input vector (length m->n_cols)
+// y     : output vector (length m->n_rows) - must be allocated by caller
+// num_threads: if <=0 uses omp_get_max_threads()
+void merge_path_csr_mv(const Sparse_CSR *m, const double *x, double *y, int num_threads)
+{
+    if (!m || !x || !y) return;
+
+    unsigned num_rows = m->n_rows;
+    unsigned nnz = m->row_ptr[num_rows]; // last entry is total number of nonzeros
+    const unsigned *row_ptr = m->row_ptr;
+    const unsigned *col_ind = m->col_ind;
+    const double   *val     = m->values;
+
+    if (num_threads <= 0) num_threads = omp_get_max_threads();
+
+    // Prepare the "row_end_offsets" array: row_ptr + 1 in the paper (end offset for each row)
+    // We can just use &row_ptr[1] as pointer, but MergePathSearch expects length = num_rows,
+    // so pass &row_ptr[1] and a_len = num_rows. To simplify indexing we create a small pointer:
+    const unsigned *row_end_offsets = &row_ptr[1]; // length num_rows; entries in [0..nnz]
+
+    unsigned num_merge_items = num_rows + nnz;
+    unsigned items_per_thread = (num_merge_items + (unsigned)num_threads - 1u) / (unsigned)num_threads;
+
+    // allocate carry arrays (one per thread)
+    unsigned *row_carry_out = (unsigned*) malloc((size_t)num_threads * sizeof(unsigned));
+    double   *value_carry_out = (double*) malloc((size_t)num_threads * sizeof(double));
+
+    // Initialize y to 0.0
+    for (unsigned r = 0; r < num_rows; ++r) y[r] = 0.0;
+
+    #pragma omp parallel num_threads(num_threads)
+    {
+        int tid = omp_get_thread_num();
+        // compute this thread's diagonal start and end (clamped)
+        unsigned diagonal = items_per_thread * (unsigned)tid;
+        if (diagonal > num_merge_items) diagonal = num_merge_items;
+        unsigned diagonal_end = diagonal + items_per_thread;
+        if (diagonal_end > num_merge_items) diagonal_end = num_merge_items;
+
+        // Find starting and ending coordinates on the merge grid
+        MergeCoord coord = MergePathSearch(diagonal, row_end_offsets, num_rows, nnz);
+        MergeCoord coord_end = MergePathSearch(diagonal_end, row_end_offsets, num_rows, nnz);
+
+        // Now consume exactly (diagonal_end - diagonal) merge items sequentially
+        unsigned items_to_consume = diagonal_end - diagonal;
+        double running_total = 0.0;
+        // These local copies speed up accesses
+        unsigned local_row = coord.row;
+        unsigned local_nz  = coord.nz;
+
+        for (unsigned step = 0; step < items_to_consume; ++step) {
+            // If next nonzero index is inside the current row (move down), else move right (row end).
+            // Condition from paper: nz_index < row_end_offsets[row_index]
+            // But we must guard against row index == num_rows (no more rows)
+            if (local_row < num_rows && local_nz < row_end_offsets[local_row]) {
+                // Move down: consume a nonzero
+                double a = val[local_nz];
+                unsigned col = col_ind[local_nz];
+                // FMA or fallback
+                running_total = fma_fallback(a, x[col], running_total);
+                ++local_nz;
+            } else {
+                // Move right: flush row result and reset accumulator, advance row index
+                if (local_row < num_rows) {
+                    // store the running_total as the row's value
+                    y[local_row] = running_total;
+                }
+                running_total = 0.0;
+                ++local_row;
+            }
+        }
+
+        // Save carry-out: the row index that would be next and the partial running_total
+        row_carry_out[tid] = local_row;
+        value_carry_out[tid] = running_total;
+    } // end parallel region
+
+    // Carry-out fix-up: if a thread ended inside a row (i.e., that row index < num_rows),
+    // then its partial value must be added to y[row] (the later thread that wrote y[row] wrote only its local part).
+    // Only need to apply adds for thread 0..num_threads-1 (paper does up to num_threads-2)
+    for (int t = 0; t < num_threads; ++t) {
+        unsigned r = row_carry_out[t];
+        if (r < num_rows) {
+            // atomic add to be safe in case multiple threads wrote to same row (should only be neighbor threads,
+            // but we run serially here so atomic not necessary; keep serial add)
+            y[r] += value_carry_out[t];
+        }
+    }
+
+    free(row_carry_out);
+    free(value_carry_out);
 }
 
 
 
-//function to initialize a struct COO given the data extracted from .mtx file
+
+// function to initialize a struct COO given the data extracted from .mtx file
 Sparse_Coordinate* initialize_COO(
     int n_rows,
     int n_cols,
@@ -80,7 +188,7 @@ Sparse_Coordinate* initialize_COO(
     double* values
 )
 {
-    Sparse_Coordinate* struct_COO = malloc(sizeof(Sparse_Coordinate));
+    Sparse_Coordinate* struct_COO = surely_malloc(sizeof(Sparse_Coordinate));
     struct_COO->n_rows = n_rows;
     struct_COO->n_cols = n_cols;
     struct_COO->nnz = nnz;
@@ -92,7 +200,7 @@ Sparse_Coordinate* initialize_COO(
 }
 
 
-//function to perform matrix
+// function to perform spmv on COO
 void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
     for(int i = 0; i < COO->n_rows; i++){
         res[i] = 0;
@@ -178,108 +286,13 @@ Sparse_CSR *coo_to_csr_matrix(Sparse_Coordinate *p) {
     q->n_cols = cols;
     return q;          /* partial_CSR_properties */
 }
+
 /*
 For SpMV, focus on memory/cache optimizations first (reordering, 
 blocking, prefetching, improve locality, reduce indirection) 
 — they yield larger gains. Then focus on optimizing computation (vectorization,
 parallelization)
 */
-
-// coo to csb conversion
-Sparse_CSB *coo_to_csb(
-        int n_rows, int n_cols, int nnz,
-        int *I, int *J, double *V)
-{
-    Sparse_CSB *A = malloc(sizeof(Sparse_CSB));
-    A->n_rows = n_rows;
-    A->n_cols = n_cols;
-    A->nnz    = nnz;
-
-    unsigned beta = choose_beta_pow2(n_rows);
-    unsigned bits = 0; while ((1u << bits) < beta) bits++;
-    unsigned nb_r = (n_rows + beta - 1) / beta;
-    unsigned nb_c = (n_cols + beta - 1) / beta;
-
-    A->beta  = beta;
-    A->bits  = bits;
-    A->nb_r  = nb_r;
-    A->nb_c  = nb_c;
-
-    unsigned num_blocks = nb_r * nb_c;
-
-    // Allocate block vectors
-    BlockEntry **blocks = calloc(num_blocks, sizeof(BlockEntry*));
-    unsigned    *counts = calloc(num_blocks, sizeof(unsigned));
-    unsigned    *caps   = calloc(num_blocks, sizeof(unsigned));
-
-    for (int k = 0; k < nnz; k++) {
-        int r = I[k], c = J[k];
-        int brow = r / beta;
-        int bcol = c / beta;
-        int r_in = r % beta;
-        int c_in = c % beta;
-
-        unsigned b = brow * nb_c + bcol;
-
-        // grow block if needed
-        if (counts[b] == caps[b]) {
-            caps[b] = caps[b] ? 2*caps[b] : 8;
-            blocks[b] = realloc(blocks[b], caps[b] * sizeof(BlockEntry));
-        }
-
-        BlockEntry *e = &blocks[b][counts[b]++];
-
-        e->r_in = r_in;
-        e->c_in = c_in;
-        e->val  = V[k];
-        e->key  = morton_key(r_in, c_in, bits);
-    }
-
-    // sort each block by Morton order
-    int cmp(const void *a, const void *b) {
-        uint32_t ka = ((BlockEntry*)a)->key;
-        uint32_t kb = ((BlockEntry*)b)->key;
-        return (ka > kb) - (ka < kb);
-    }
-
-    for (unsigned b = 0; b < num_blocks; b++)
-        if (counts[b] > 1)
-            qsort(blocks[b], counts[b], sizeof(BlockEntry), cmp);
-
-    // Allocate output arrays
-    A->values = malloc(nnz * sizeof(double));
-    A->idx    = malloc(nnz * sizeof(uint32_t));
-    A->blk_ptr = malloc((num_blocks + 1) * sizeof(unsigned));
-
-    // build blk_ptr and flatten blocks
-    unsigned pos = 0;
-    A->blk_ptr[0] = 0;
-
-    for (unsigned b = 0; b < num_blocks; b++) {
-        unsigned cnt = counts[b];
-        for (unsigned t = 0; t < cnt; t++) {
-            BlockEntry *e = &blocks[b][t];
-            A->values[pos] = e->val;
-            A->idx[pos]    = (e->r_in << bits) | e->c_in;
-            pos++;
-        }
-        A->blk_ptr[b+1] = pos;
-    }
-
-    // free temporary blocks
-    for (unsigned b = 0; b < num_blocks; b++)
-        free(blocks[b]);
-
-    free(blocks);
-    free(counts);
-    free(caps);
-
-    return A;
-}
-
-
-
-
 void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
     unsigned i, rows = m->n_rows;
     double *val = m->values;
@@ -288,6 +301,7 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
     unsigned next=row_ptr[0];
 
     // sequential implementation
+    #pragma omp parallel for schedule(static)
     for (i = 0; i < rows; i++) {
         double s = 0.0; // private scope to each thread
         for (unsigned h = row_ptr[i]; h < row_ptr[i + 1]; h++) {
@@ -300,44 +314,69 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
 
 }
 
-// csb multiplication
-void csb_spmv(const Sparse_CSB *A, const double *x, double *y)
-{
-    unsigned n = A->n_rows;
-    memset(y, 0, n * sizeof(double));
 
-    unsigned beta = A->beta;
-    unsigned bits = A->bits;
-    unsigned nb_r = A->nb_r;
-    unsigned nb_c = A->nb_c;
 
-    #pragma omp parallel for schedule(dynamic)
-    for (int brow = 0; brow < (int)nb_r; brow++) {
-
-        for (unsigned bcol = 0; bcol < nb_c; bcol++) {
-
-            unsigned b = brow * nb_c + bcol;
-            unsigned start = A->blk_ptr[b];
-            unsigned end   = A->blk_ptr[b+1];
-
-            unsigned row_base = brow * beta;
-            unsigned col_base = bcol * beta;
-
-            for (unsigned p = start; p < end; p++) {
-
-                uint32_t packed = A->idx[p];
-                unsigned r_in = packed >> bits;
-                unsigned c_in = packed & ((1u << bits) - 1);
-
-                unsigned i = row_base + r_in;
-                unsigned j = col_base + c_in;
-
-                y[i] += A->values[p] * x[j];
-            }
-        }
+static void init_random_vector(double *v, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) {
+        v[i] = ((double)rand() / RAND_MAX) * 2.0 - 1.0;
     }
 }
 
+int validate_results(const double *a, const double *b, unsigned n,
+                     double tol, int print_errors)
+{
+    int errors = 0;
+    for (unsigned i = 0; i < n; ++i) {
+        double diff = fabs(a[i] - b[i]);
+        if (diff > tol) {
+            errors++;
+            if (print_errors && errors < 20) {
+                printf("Mismatch at row %u: seq=%g, merge=%g (diff=%g)\n",
+                       i, a[i], b[i], diff);
+            }
+        }
+    }
+    return errors;
+}
+
+void test_csr_merge_path(Sparse_CSR *csr)
+{
+    unsigned n = csr->n_cols;
+    unsigned m = csr->n_rows;
+
+    // allocate vectors
+    double *x = malloc(n * sizeof(double));
+    double *y_seq = malloc(m * sizeof(double));
+    double *y_merge = malloc(m * sizeof(double));
+
+    srand(0);
+    init_random_vector(x, n);
+
+    // --- sequential ---
+    double t0 = omp_get_wtime();
+    csr_mv_multiply(csr, x, y_seq);
+    double t1 = omp_get_wtime();
+
+    // --- merge path ---
+    double t2 = omp_get_wtime();
+    merge_path_csr_mv(csr, x, y_merge, 0);  // 0 → use OMP default number of threads
+    double t3 = omp_get_wtime();
+
+    printf("\nSequential CSR time      = %.6f s\n", t1 - t0);
+    printf("Merge-Path CSR time      = %.6f s\n", t3 - t2);
+
+    // validate
+    int errors = validate_results(y_seq, y_merge, m, 1e-12, 1);
+    if (errors == 0) {
+        printf("\n Results match. Merge-Path CSR is correct.\n");
+    } else {
+        printf("\n ERROR: %d mismatches found.\n", errors);
+    }
+
+    free(x);
+    free(y_seq);
+    free(y_merge);
+}
 
 
 int main(int argc, char *argv[])
@@ -369,8 +408,8 @@ int main(int argc, char *argv[])
     }
 
 
-    /*  This is how one can screen matrix types if their application */
-    /*  only supports a subset of the Matrix Market data types.      */
+    //  This is how one can screen matrix types if their application 
+    //  only supports a subset of the Matrix Market data types.     
     if (mm_is_complex(matcode) && mm_is_matrix(matcode) && 
             mm_is_sparse(matcode) )
     {
@@ -379,15 +418,15 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    /* find out size of sparse matrix .... */
+    // find out size of sparse matrix .... 
     if ((ret_code = mm_read_mtx_crd_size(f, &M, &N, &nz)) !=0)
         exit(1);
 
 
-    /* reseve memory for matrices */
-    I = (int *) malloc(nz * sizeof(int));
-    J = (int *) malloc(nz * sizeof(int));
-    val = (double *) malloc(nz * sizeof(double));
+    // reseve memory for matrices 
+    I = (int *) surely_malloc(nz * sizeof(int));
+    J = (int *) surely_malloc(nz * sizeof(int));
+    val = (double *) surely_malloc(nz * sizeof(double));
 
 
     /* NOTE: when reading in doubles, ANSI C requires the use of the "l"  */
@@ -417,8 +456,8 @@ int main(int argc, char *argv[])
     //Sparse_CSR* struct_CSR = convert_COO_CSR(M, N, nz, &struct_COO);
 
     //INITIALIZE MATRIX VECTOR MULTIPLICATION
-    double* res = malloc(M * sizeof(double));
-    double* vec = malloc(N * sizeof(double));
+    double* res = surely_malloc(M * sizeof(double));
+    double* vec = surely_malloc(N * sizeof(double));
 
     //INITIALIZE RANDOM VECTOR
     srand(0);
@@ -429,35 +468,19 @@ int main(int argc, char *argv[])
     //compute SpMV with COO 
     SpMV_COO(struct_COO, vec, res);
 
-    // printf("\nResult (first 10 entries):\n");
-    // for (int i = 0; i < M && i < 10; i++) {
-    //     printf("res[%d] = %g\n", i, res[i]);
-    // }
-
     //INITIALIZE CSR MATRIX FROM COO
     Sparse_CSR* struct_CSR = coo_to_csr_matrix(struct_COO);
-    double* res_csr = malloc(M * sizeof(double));
-
-    //COMPUTE SpMV WITH CSR
-    double start = omp_get_wtime();
-    csr_mv_multiply(struct_CSR, vec, res_csr);
-    double end = omp_get_wtime();
-    printf("\nElapsed time: %g seconds\n", end - start);
-
-    // printf("\nCSR Result (first 10 entries):\n");
-    // for (int i = 0; i < M && i < 10; i++) {
-    //     printf("res_csr[%d] = %g\n", i, res_csr[i]);
-    // }   
+    
+    printf("\n===== Testing merge-path CSR SpMV correctness =====\n");
+    test_csr_merge_path(struct_CSR);
     
     free(I);
     free(J);
     free(val);
     free(vec);
     free(res);
-    free(res_csr);
     free(struct_CSR);      
     free(struct_COO);
     
     return 0;
-
 }

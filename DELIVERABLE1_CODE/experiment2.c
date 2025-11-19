@@ -151,7 +151,7 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
 
     //  manual static partitioning: each thread writes a contiguous block of rows
     // (avoids different threads writing elements that share a cache line) 
-    #pragma omp parallel
+    #pragma omp parallel            
     {
         int tid = omp_get_thread_num();
         int nthreads = omp_get_num_threads();
@@ -172,7 +172,7 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
 
 int main(int argc, char *argv[])
 {
-    //FOR NOW I'LL USE THE EXAMPLE GIVEN
+    
     int ret_code;
     MM_typecode matcode;
     FILE *f;
@@ -251,11 +251,11 @@ int main(int argc, char *argv[])
     double* vec;
 
     //allocate aligned result/vector buffers to 64 bytes boundary ? is this even correct ? 
-    if (posix_memalign((void**)&res, 64, N * sizeof(double)) != 0) { // allocate res aligned to 64 bytes
+    if (posix_memalign((void**)&res, 64, M * sizeof(double)) != 0) { // allocate res aligned to 64 bytes
         perror("posix_memalign res");
         exit(1);
     }
-    if (posix_memalign((void**)&vec, 64, M * sizeof(double)) != 0) {
+    if (posix_memalign((void**)&vec, 64, N * sizeof(double)) != 0) {
         perror("posix_memalign vec");
         exit(1);
     }
@@ -270,10 +270,6 @@ int main(int argc, char *argv[])
     //compute SpMV with COO 
     SpMV_COO(struct_COO, vec, res);
 
-    // printf("\nResult (first 10 entries):\n");
-    // for (int i = 0; i < M && i < 10; i++) {
-    //     printf("res[%d] = %g\n", i, res[i]);
-    // }
 
     //INITIALIZE CSR MATRIX FROM COO
     Sparse_CSR* struct_CSR = coo_to_csr_matrix(struct_COO);
@@ -288,11 +284,7 @@ int main(int argc, char *argv[])
     csr_mv_multiply(struct_CSR, vec, res_csr);
     double end = omp_get_wtime();
     printf("\nElapsed time: %g seconds\n", end - start);
-
-    // printf("\nCSR Result (first 10 entries):\n");
-    // for (int i = 0; i < M && i < 10; i++) {
-    //     printf("res_csr[%d] = %g\n", i, res_csr[i]);
-    // }   
+ 
     
     free(I);
     free(J);
@@ -306,49 +298,5 @@ int main(int argc, char *argv[])
     return 0;
 
 
-    // test for quicksort
-    // unsigned rows[] = {2, 0, 1, 2, 0};
-    // unsigned cols[] = {1, 2, 0, 0, 1};
-    // double vals[] =  {5.0, 2.0, 1.0, 4.0, 3.0};
-
-    // Sparse_Coordinate coo = {
-    //     .n_rows = 3,
-    //     .n_cols = 3,
-    //     .nnz = 5,
-    //     .row_indices = rows,
-    //     .col_indices = cols,
-    //     .values = vals
-    // };
-
-    // quicksort_coo(&coo);
-
-    // for (unsigned i = 0; i < coo.nnz; i++)
-    //     printf("(%u, %u, %.1f)\n", rows[i], cols[i], vals[i]);
-
 }
 
-
-
-
-
-/*
-NOTES ON PARALLELIZATION
-CACHE
-
-- efficient parallel code we need to assure that SEQUENTIAL PARTS ARE PERFORMANT
-- TRY TO COORDINATE SEQUENTIAL PARTS in such a way that exploit cache as much as possible (eg row major, ...)
-- WARNING:
-    - FALSE SHARING MAY BE A PROBLEM
-    -> if you use cache, pay attention to cache lines: if data is invalidated, the entire content of cache line is
-    -> FORCE VARIABLES WHICH ARE ACCESSED BY DIFFERENT THREADS TO BE ON DIFFERENT CACHE LINES
-    
-        struct alignTo64ByteCacheLine {
-            int _onCacheLine1 __attribute__((aligned(64)))
-            int _onCacheLine2 __attribute__((aligned(64)))
-        }
-
-    - BRANCH PREDICTION
-    -> Random data leads to unpredictable branches, slowing execution
-    -> SORTING data can improve branch prediction and speed up execution
-
-*/

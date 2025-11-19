@@ -104,36 +104,36 @@ Sparse_CSR *coo_to_csr_matrix(Sparse_Coordinate *p) {
         x = pval[i];
         if (ri==r){
             if (ci==c)
-                val[l-1] += x; /* partial_csr_duplicate */
+                val[l-1] += x; // partial_csr_duplicate
             else {
                 c=ci;
                 col_ind[l] = ci;
                 val[l] = x;
-                l++;           /* partial_csr_newcol */
+                l++;           // partial_csr_newcol
             }
         }
         else{
-            while (r+1<=ri) row_ptr[++r]=l; /* partial_csr_skiprow */
+            while (r+1<=ri) row_ptr[++r]=l; // partial_csr_skiprow 
             c= ci;
             col_ind[l] = ci;
             val[l] = x;
-            l++;            /* partial_csr_newrow */
+            l++;            // partial_csr_newrow 
         }
     }
     cols = p->n_cols;
-    while (r+1<=rows) row_ptr[++r]=l;  /* partial_csr_lastrows */
+    while (r+1<=rows) row_ptr[++r]=l;  // partial_csr_lastrows 
     q->values = val;
     q->col_ind = col_ind;
     q->row_ptr = row_ptr;
     q->n_rows = rows;
     q->n_cols = cols;
-    return q;          /* partial_CSR_properties */
+    return q;          // partial_CSR_properties 
 }
 
 /*
 For SpMV, focus on memory/cache optimizations first (reordering, 
 blocking, prefetching, improve locality, reduce indirection) 
-— they yield larger gains. Then focus on optimizing computation (vectorization,
+— they yield larger gains. Then focus on optimizing computation (eventual vectorization,
 parallelization)
 */
 void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
@@ -163,11 +163,11 @@ int main(int argc, char *argv[])
     int ret_code;
     MM_typecode matcode;
     FILE *f;
-    int M, N, nz;   
+    int M, N, nz;   // M=rows N=cols nz=nonzeroes
     int i, *I, *J;
     double *val;
 
-    /*Initialize struct for sparse matrix */
+    // Initialize struct for sparse matrix 
     if (argc < 2)
 	{
 		fprintf(stderr, "Usage: %s [martix-market-filename]\n", argv[0]);
@@ -228,29 +228,24 @@ int main(int argc, char *argv[])
     //     fprintf(stdout, "%d %d %20.19g\n", I[i]+1, J[i]+1, val[i]);
     // }
 
-    //create struct with data read from .mtx file
+    // create struct with data read from .mtx file
     Sparse_Coordinate* struct_COO = initialize_COO(M, N, nz, I, J, val);
-    //convert COO to CSR
-    //Sparse_CSR* struct_CSR = convert_COO_CSR(M, N, nz, &struct_COO);
 
-    //INITIALIZE MATRIX VECTOR MULTIPLICATION
+    // INITIALIZE MATRIX VECTOR MULTIPLICATION
     double* res = surely_malloc(M * sizeof(double));
     double* vec = surely_malloc(N * sizeof(double));
 
-    //INITIALIZE RANDOM VECTOR
+    // INITIALIZE RANDOM VECTOR
     srand(0);
     for(int i = 0; i < N; i++){
         vec[i] = rand() % 10;
     }
 
-    //compute SpMV with COO 
-    SpMV_COO(struct_COO, vec, res);
-
-    //INITIALIZE CSR MATRIX FROM COO
+    // INITIALIZE CSR MATRIX FROM COO
     Sparse_CSR* struct_CSR = coo_to_csr_matrix(struct_COO);
-    double* res_csr = malloc(M * sizeof(double));
+    double* res_csr = surely_malloc(M * sizeof(double));
 
-    //COMPUTE SpMV WITH CSR
+    // COMPUTE SpMV WITH CSR
     double start = omp_get_wtime();
     csr_mv_multiply(struct_CSR, vec, res_csr);
     double end = omp_get_wtime();
