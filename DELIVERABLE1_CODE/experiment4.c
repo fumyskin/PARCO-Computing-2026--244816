@@ -2,9 +2,22 @@
 #include <stdlib.h>
 #include <immintrin.h>
 #include <pthread.h>
-#include <omp.h>
+#include <omp.h> 
 #include "mmio.h"
 #include "specifications.h"
+
+
+/*
+*    PREMISE:
+*    - in case one wants to try optimized version, run with:
+*      gcc -O3 mmio.h specifications.c experiment4.c -fopenmp -ffp-contract=fast -o spmv_bind
+*
+*    - otherwise, withouth optimization of brach prediction, run with:
+*      gcc mmio.h specifications.c experiment4.c -fopenmp -o spmv_bind
+*
+*   - use compile1.sh script to run this code with proc binding
+*
+*/
 
 
 /* ATTEMPT TO USE PROC_BINDING -> see compile1.sh */
@@ -38,8 +51,7 @@
 */
 
 
-
-//define fma block operation
+// define fma block operation
 #if defined(__x86_64__) && defined(__FMA__)
 static inline double fma_fallback(double a, double b, double c) {
     __m128d A = _mm_set_sd(a);
@@ -54,25 +66,17 @@ static inline double fma_fallback(double a, double b, double c) {
 }
 #endif
 
-
-//padding structure to avoid false sharing between threads
-// typedef struct alignTo64ByteCacheLine {
-//     int_onCacheLine1__attribute__((aligned(64)));
-//     int_onCacheLine2__attribute__((aligned(64)));
-// };
-
-
-//function to initialize a struct COO given the data extracted from .mtx file
+// function to initialize a struct COO given the data extracted from .mtx file
 Sparse_Coordinate* initialize_COO(
-    int n_rows,
-    int n_cols,
-    int nnz,
-    int* row_indices,
-    int* col_indices,
+    unsigned n_rows,
+    unsigned n_cols,
+    unsigned nnz,
+    unsigned* row_indices,
+    unsigned* col_indices,
     double* values
 )
 {
-    Sparse_Coordinate* struct_COO = malloc(sizeof(Sparse_Coordinate));
+    Sparse_Coordinate* struct_COO = surely_malloc(sizeof(Sparse_Coordinate));
     struct_COO->n_rows = n_rows;
     struct_COO->n_cols = n_cols;
     struct_COO->nnz = nnz;
@@ -84,15 +88,15 @@ Sparse_Coordinate* initialize_COO(
 }
 
 
-//function to perform matrix
+// function to perform Spmv on COO
 void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
-    for(int i = 0; i < COO->n_rows; i++){
+    for(unsigned i = 0; i < COO->n_rows; i++){
         res[i] = 0;
     }
 
-    for(ssize_t nnz_id = 0; nnz_id < COO->nnz; nnz_id++){
-        ssize_t i = COO->row_indices[nnz_id];
-        ssize_t j = COO->col_indices[nnz_id];
+    for(unsigned nnz_id = 0; nnz_id < COO->nnz; nnz_id++){
+        unsigned i = COO->row_indices[nnz_id];
+        unsigned j = COO->col_indices[nnz_id];
         double val = COO->values[nnz_id];
 
         res[i] += val * vec[j]; 
@@ -100,7 +104,6 @@ void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
 
     return;
 }
-
 
 unsigned coo_count(Sparse_Coordinate *p){
     if (p == NULL || p->nnz == 0)
@@ -205,18 +208,17 @@ https://inria.hal.science/hal-03768726/document
 
 */
 
-
 int main(int argc, char *argv[])
 {
-    //FOR NOW I'LL USE THE EXAMPLE GIVEN
     int ret_code;
     MM_typecode matcode;
     FILE *f;
-    int M, N, nz;   
-    int i, *I, *J;
+    int M, N, nz;   // M=rows, N=cols, nz=nonzeroes
+    int i;
+    unsigned *I, *J;
     double *val;
 
-    /*Initialize struct for sparse matrix */
+    // Initialize struct for sparse matrix 
     if (argc < 2)
 	{
 		fprintf(stderr, "Usage: %s [martix-market-filename]\n", argv[0]);
@@ -235,8 +237,8 @@ int main(int argc, char *argv[])
     }
 
 
-    /*  This is how one can screen matrix types if their application */
-    /*  only supports a subset of the Matrix Market data types.      */
+    //  This is how one can screen matrix types if their application 
+    //  only supports a subset of the Matrix Market data types.     
     if (mm_is_complex(matcode) && mm_is_matrix(matcode) && 
             mm_is_sparse(matcode) )
     {
@@ -245,15 +247,15 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    /* find out size of sparse matrix .... */
+    // find out size of sparse matrix .... 
     if ((ret_code = mm_read_mtx_crd_size(f, &M, &N, &nz)) !=0)
         exit(1);
 
 
-    /* reseve memory for matrices */
-    I = (int *) malloc(nz * sizeof(int));
-    J = (int *) malloc(nz * sizeof(int));
-    val = (double *) malloc(nz * sizeof(double));
+    // reserve memory for matrices 
+    I = (unsigned *) surely_malloc(nz * sizeof(unsigned));
+    J = (unsigned *) surely_malloc(nz * sizeof(unsigned));
+    val = (double *) surely_malloc(nz * sizeof(double));
 
 
     /* NOTE: when reading in doubles, ANSI C requires the use of the "l"  */
@@ -261,9 +263,10 @@ int main(int argc, char *argv[])
     /*  (ANSI C X3.159-1989, Sec. 4.9.6.2, p. 136 lines 13-15)            */
     for (i=0; i<nz; i++)
     {
-        fscanf(f, "%d %d %lg\n", &I[i], &J[i], &val[i]);
-        I[i]--;  /* adjust from 1-based to 0-based */
-        J[i]--;
+        int temp_i, temp_j;
+        fscanf(f, "%d %d %lg\n", &temp_i, &temp_j, &val[i]);
+        I[i] = (unsigned)(temp_i - 1);
+        J[i] = (unsigned)(temp_j - 1);
     }
 
     if (f !=stdin) fclose(f);
@@ -277,34 +280,39 @@ int main(int argc, char *argv[])
     //     fprintf(stdout, "%d %d %20.19g\n", I[i]+1, J[i]+1, val[i]);
     // }
 
-    //create struct with data read from .mtx file
-    Sparse_Coordinate* struct_COO = initialize_COO(M, N, nz, I, J, val);
-    //convert COO to CSR
-    //Sparse_CSR* struct_CSR = convert_COO_CSR(M, N, nz, &struct_COO);
+    // create struct with data read from .mtx file
+    Sparse_Coordinate* struct_COO = initialize_COO((unsigned)M, (unsigned)N, (unsigned)nz, I, J, val);
 
-    //INITIALIZE MATRIX VECTOR MULTIPLICATION
+    // INITIALIZE MATRIX VECTOR MULTIPLICATION
     double* res;
     double* vec;
 
-    //allocate aligned result/vector buffers to 64 bytes boundary ? is this even correct ? 
-    if (posix_memalign((void**)&res, 64, N * sizeof(double)) != 0) { // allocate res aligned to 64 bytes
+    //allocate aligned result/vector buffers to 64 bytes boundary  
+    /*  posix_memaling from man:
+    *
+    *   int posix_memalign(void **memptr, size_t alignment, size_t size);
+    *   
+    *   posix_memalign() allocates size bytes and places the address of the allocated memory in *memptr.  The address of the allo‐
+    *   cated memory will be a multiple of alignment, which must be a power of two and a multiple of sizeof(void *).  This address
+    *   can  later  be  successfully passed to free(3).  If size is 0, then the value placed in *memptr is either NULL or a unique
+    *   pointer value.
+    *
+    */
+    if (posix_memalign((void**)&res, 64, M * sizeof(double)) != 0) { // allocate res pointer aligned to 64 bytes
         perror("posix_memalign res");
         exit(1);
     }
-    if (posix_memalign((void**)&vec, 64, M * sizeof(double)) != 0) {
+    if (posix_memalign((void**)&vec, 64, N * sizeof(double)) != 0) {
         perror("posix_memalign vec");
         exit(1);
     }
 
-
-    //INITIALIZE RANDOM VECTOR
+    // INITIALIZE RANDOM VECTOR
     srand(0);
     for(int i = 0; i < N; i++){
         vec[i] = rand() % 10;
     }
-
-    //compute SpMV with COO 
-    SpMV_COO(struct_COO, vec, res);
+    
 
     //INITIALIZE CSR MATRIX FROM COO
     Sparse_CSR* struct_CSR = coo_to_csr_matrix(struct_COO);
@@ -320,6 +328,18 @@ int main(int argc, char *argv[])
     double end = omp_get_wtime();
     printf("\nElapsed time: %g seconds\n", end - start);
 
+    // //COMPUTE SpMV WITH COO (for verification)
+    // SpMV_COO(struct_COO, vec, res);
+
+    // printf("\nResult (first 10 entries):\n");
+    // for (int i = 0; i < M && i < 10; i++) {
+    //     printf("res[%d] = %g\n", i, res[i]);
+    // }
+
+    // printf("\nCSR Result (first 10 entries):\n");
+    // for (int i = 0; i < M && i < 10; i++) {
+    //     printf("res_csr[%d] = %g\n", i, res_csr[i]);
+    // } 
     
     free(I);
     free(J);
@@ -333,3 +353,5 @@ int main(int argc, char *argv[])
     return 0;
 
 }
+
+
