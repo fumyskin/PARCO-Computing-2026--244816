@@ -53,3 +53,7 @@ Results can be found at folder /DELIVERABLE1_RES. More specifically:
 - **/TESTBENCH3_RES**: simulations run **WITHOUT** cold start **WITH OPTIMIZATION FLAGS**. Contains, for each matrix, 2 .csv files with the following specifications:
     - < name_matrix >.csv -> contains the results which USE DEFAULT CHUNKSIZE
     - < name_matrix >_chunked.csv -> contains the results of runtime scheduling REPORTING DIFFERENT CHUNKSIZES
+- TESTBENCH3_BIND: contains the results for the spmv_bind simulation (run with compile1.sh)
+
+## IMAGES
+Images can be found, for each testbench, in the folder /DELIVERABLE1_IMAGES
