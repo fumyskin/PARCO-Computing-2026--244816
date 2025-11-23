@@ -77,47 +77,39 @@ void SpMV_COO(Sparse_Coordinate* COO, double* vec, double* res){
 //                   (this is A.row_ptr + 1 in the paper: the end index for each row)
 static inline MergeCoord MergePathSearch(
     unsigned diagonal,
-    const unsigned *row_end_offsets, // length a_len, each entry is an index in [0..b_len]
+    const unsigned *row_end_offsets,
     unsigned a_len,
     unsigned b_len)
 {
-    // x corresponds to number of row-end events consumed (0..a_len)
-    // y = diagonal - x
-    unsigned x_min = (diagonal > b_len) ? (diagonal - b_len) : 0;
-    unsigned x_max = (diagonal < a_len) ? diagonal : a_len;
+    int x_min = (int)diagonal - (int)b_len;
+    if (x_min < 0) x_min = 0;
+    int x_max = (int)diagonal;
+    if (x_max > (int)a_len) x_max = (int)a_len;
 
-    // binary search along x in [x_min, x_max]
     while (x_min < x_max) {
-        unsigned pivot = (x_min + x_max) >> 1;
-        // Compare A[pivot] <= B[diagonal - pivot - 1]
-        // Here B[k] == k  (the natural numbers), so B[diagonal - pivot - 1] == (diagonal - pivot - 1)
-        // Careful when diagonal - pivot == 0: then diagonal - pivot - 1 underflows -> but
-        // the conditional range of pivot ensures we won't read invalid B index: the formula
-        // is the same as in the paper.
-        int b_index = (int)diagonal - (int)pivot - 1; // may be negative
-        // If b_index < 0 then treat B[b_index] as -infty -> then condition A[pivot] <= B[...] false
-        int cmp;
+        int pivot = (x_min + x_max) >> 1;
+        int b_index = (int)diagonal - pivot - 1;
+
+        int cond;
         if (b_index < 0) {
-            cmp = 0; // a[pivot] <= B[...] is false (keep bottom-left)
+            cond = 0;
         } else {
-            // row_end_offsets[pivot] is an unsigned index into nonzero array
-            // compare row_end_offsets[pivot] <= b_index
-            cmp = (row_end_offsets[pivot] <= (unsigned)b_index);
+            cond = (row_end_offsets[pivot] <= (unsigned)b_index);
         }
-        if (cmp) {
-            // keep top-right half
+
+        if (cond) {
             x_min = pivot + 1;
         } else {
-            // keep bottom-left half
             x_max = pivot;
         }
     }
 
     MergeCoord c;
-    c.row = (x_min < a_len) ? x_min : a_len;
-    c.nz  = diagonal - x_min;
+    c.row = (unsigned)x_min;
+    c.nz  = diagonal - (unsigned)x_min;
     return c;
 }
+
 
 
 // Merge-path based parallel CSR SpMV
@@ -149,44 +141,50 @@ void merge_path_csr_mv(const Sparse_CSR *m, const double *x, double *y, int num_
     unsigned *row_carry_out = (unsigned*) malloc((size_t)num_threads * sizeof(unsigned));
     double   *value_carry_out = (double*) malloc((size_t)num_threads * sizeof(double));
 
+    if (!row_carry_out || !value_carry_out) {
+        fprintf(stderr, "Allocation failure in merge_path_csr_mv\n");
+        if (row_carry_out) free(row_carry_out);
+        if (value_carry_out) free(value_carry_out);
+        return;
+    }
+
     // Initialize y to 0.0
     for (unsigned r = 0; r < num_rows; ++r) y[r] = 0.0;
 
-    #pragma omp parallel num_threads(num_threads)
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    for (int tid = 0; tid < num_threads; ++tid)
     {
-        int tid = omp_get_thread_num();
-        // compute this thread's diagonal start and end (clamped)
         unsigned diagonal = items_per_thread * (unsigned)tid;
         if (diagonal > num_merge_items) diagonal = num_merge_items;
         unsigned diagonal_end = diagonal + items_per_thread;
         if (diagonal_end > num_merge_items) diagonal_end = num_merge_items;
 
-        // Find starting and ending coordinates on the merge grid
+        // Find starting coordinate and ending coordinate
         MergeCoord coord = MergePathSearch(diagonal, row_end_offsets, num_rows, nnz);
         MergeCoord coord_end = MergePathSearch(diagonal_end, row_end_offsets, num_rows, nnz);
 
-        // Now consume exactly (diagonal_end - diagonal) merge items sequentially
-        unsigned items_to_consume = diagonal_end - diagonal;
-        double running_total = 0.0;
-        // These local copies speed up accesses
         unsigned local_row = coord.row;
         unsigned local_nz  = coord.nz;
 
-        for (unsigned step = 0; step < items_to_consume; ++step) {
-            // If next nonzero index is inside the current row (move down), else move right (row end).
-            // Condition from paper: nz_index < row_end_offsets[row_index]
-            // But we must guard against row index == num_rows (no more rows)
+        double running_total = 0.0;
+
+        unsigned items_to_consume = diagonal_end - diagonal;
+        // Use Algorithm 4 style: single loop for items_per_thread iterations
+        for (unsigned it = 0; it < items_to_consume; ++it) {
+            // Check bounds before accessing row_end_offsets
+            // If local_row < num_rows and local_nz < row_end_offsets[local_row] consume nonzero
             if (local_row < num_rows && local_nz < row_end_offsets[local_row]) {
-                // Move down: consume a nonzero
                 double a = val[local_nz];
                 unsigned col = col_ind[local_nz];
-                // FMA or fallback
                 running_total = fma_fallback(a, x[col], running_total);
                 ++local_nz;
             } else {
                 // Move right: flush row result and reset accumulator, advance row index
-                if (local_row < num_rows) {
+                if (local_row < num_rows && running_total != 0.0) {
                     // store the running_total as the row's value
+                    // IMPORTANT: Only the thread that completes a full row writes y[row].
+                    // If the row is shared across threads, the last thread to reach
+                    // the row-end will write the final y[row]. This matches the paper.
                     y[local_row] = running_total;
                 }
                 running_total = 0.0;
@@ -199,14 +197,12 @@ void merge_path_csr_mv(const Sparse_CSR *m, const double *x, double *y, int num_
         value_carry_out[tid] = running_total;
     } // end parallel region
 
-    // Carry-out fix-up: if a thread ended inside a row (i.e., that row index < num_rows),
-    // then its partial value must be added to y[row] (the later thread that wrote y[row] wrote only its local part).
-    // Only need to apply adds for thread 0..num_threads-1 (paper does up to num_threads-2)
-    for (int t = 0; t < num_threads; ++t) {
+    // Carry-out fix-up: only threads 0 .. num_threads-2 may have partial sums for rows
+    // that were completed by a later thread. The last thread's carry is the global end.
+    for (int t = 0; t < num_threads - 1; ++t) {
         unsigned r = row_carry_out[t];
         if (r < num_rows) {
-            // atomic add to be safe in case multiple threads wrote to same row (should only be neighbor threads,
-            // but we run serially here so atomic not necessary; keep serial add)
+            // Serial addition (this is outside parallel region)
             y[r] += value_carry_out[t];
         }
     }
@@ -475,7 +471,8 @@ int main(int argc, char *argv[])
 
     for(int i = 0; i < N_ITERS; i++) {
         double t0 = omp_get_wtime();
-        csr_mv_multiply(struct_CSR, vec, res_csr);
+        //csr_mv_multiply(struct_CSR, vec, res_csr);
+        merge_path_csr_mv(struct_CSR, vec, res_csr, 0);
         double t1 = omp_get_wtime();
         total += (t1 - t0);
     }

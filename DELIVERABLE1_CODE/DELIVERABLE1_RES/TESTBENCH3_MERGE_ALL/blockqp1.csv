@@ -1,0 +1,9 @@
+Executable,Threads,Run,ChunkSize,Time
+spmv_merge,1,1,NA,0.001018
+spmv_merge,2,1,NA,0.000497
+spmv_merge,4,1,NA,0.000318
+spmv_merge,8,1,NA,0.000234
+spmv_merge,16,1,NA,0.000388
+spmv_merge,32,1,NA,0.007043
+spmv_merge,64,1,NA,0.019261
+spmv_merge,96,1,NA,0.019695

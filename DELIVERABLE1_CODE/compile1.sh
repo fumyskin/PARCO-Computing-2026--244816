@@ -6,20 +6,16 @@
 # based on specifications found in experiment1.c
 # export OMP_NUM_THREADS=96   # set manually number of threads
 export OMP_PROC_BIND=spread # evenly spread threads on the NUMA cores, still PINNING them and assuring thread affinity 
-export OMP_PLACES="\
-{0,4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68,72,76,80,84,88,92},\
-{1,5,9,13,17,21,25,29,33,37,41,45,49,53,57,61,65,69,73,77,81,85,89,93},\
-{2,6,10,14,18,22,26,30,34,38,42,46,50,54,58,62,66,70,74,78,82,86,90,94},\
-{3,7,11,15,19,23,27,31,35,39,43,47,51,55,59,63,67,71,75,79,83,87,91,95}"
+export OMP_PLACES=cores
 
 
-MATRICES=("flowmeter0/flowmeter0.mtx" "1138_bus/1138_bus.mtx")
-RUNS=10
+MATRICES=("flowmeter0/flowmeter0.mtx" "1138_bus/1138_bus.mtx" "utm5940/utm5940.mtx" "goodwin/goodwin.mtx" "G66/G66.mtx" "ex40/ex40.mtx" "cond-mat-2005/cond-mat-2005.mtx" "cvxbqp1/cvxbqp1.mtx" "blockqp1/blockqp1.mtx" "dixmaanl/dixmaanl.mtx" "epb2/epb2.mtx" "TSOPF_FS_b162_c4/TSOPF_FS_b162_c4.mtx")
+RUNS=1
 THREADS=(1 2 4 8 16 32 64 96)
-EXECUTABLES=("spmv_exp1")
+EXECUTABLES=("spmv_bind")
 CHUNK_SIZES=(10 100 1000 10000)
 
-RESULTS_DIR="DELIVERABLE1_RES/ARCH5"
+RESULTS_DIR="DELIVERABLE1_RES/TESTBENCH3_BIND"
 rm -rf "$RESULTS_DIR"        # Remove old results completely
 mkdir -p "$RESULTS_DIR"      # Create fresh folder
 

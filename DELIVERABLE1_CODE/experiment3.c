@@ -171,8 +171,7 @@ void csr_mv_multiply(Sparse_CSR *m, double *v, double *p) {
                 }
             }
         }
-    }  //implicit barrier
-    
+    }  //implicit barrier  
 }
 
 
