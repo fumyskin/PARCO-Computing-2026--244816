@@ -1,5 +1,4 @@
 #!/bin/bash
-# let's see where this goes...
 
 # Configuration
 # define exactly, for each NUMA block, the cores used 

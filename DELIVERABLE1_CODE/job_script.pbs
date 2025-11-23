@@ -10,11 +10,11 @@
 # Queue name
 #PBS -q short_cpuQ
 
-# Resources: 1 node, 2 CPUs, 2GB memory
-#PBS -l select=1:ncpus=2:mem=2gb
+# Resources: 1 node, 32 CPUs, 4GB memory
+#PBS -l select=1:ncpus=32:mem=4gb
 
 # Walltime limit
-#PBS -l walltime=00:10:00
+#PBS -l walltime=05:00:00
 
 # Load compiler module
 module load gcc91
@@ -26,5 +26,6 @@ cd "$PBS_O_WORKDIR"
 # Compile and run
 # gcc -std=c99 codename.c -o codename.out   # Uncomment if needed
 bash compile.sh
+
 
 
